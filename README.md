@@ -5,12 +5,14 @@ Interface grafica em Python para controlar 6 servomotores com Arduino Uno usando
 O projeto atende a fase de controle de servomotores:
 
 - 6 servos mapeados em D3, D5, D6, D9, D10 e D11.
-- Interface moderna com 3 abas.
+- Interface web moderna em React com 3 abas.
+- API Python com FastAPI, eventos em tempo real e comunicacao com Firmata.
 - Gravacao de posturas para formar dataset.
 - Execucao simulada sem Arduino.
 - Execucao real no Arduino via Firmata.
 - Vetor de controle com angulo, velocidade, ordem e modo.
 - Logs salvos em `logs/`.
+- Timeline, grafico angular, coreografia, playback global, live control e exportacao CSV.
 
 ## Mapeamento
 
@@ -55,6 +57,32 @@ pip install -r requirements.txt
 
 ## Rodar
 
+### Interface web React
+
+Terminal 1, backend/API:
+
+```bash
+uvicorn api_server:app --reload --host 127.0.0.1 --port 8000
+```
+
+Terminal 2, frontend:
+
+```bash
+cd web
+pnpm install
+pnpm run dev
+```
+
+Acesse:
+
+```text
+http://127.0.0.1:5173
+```
+
+Se preferir npm, use `npm install` e `npm run dev`.
+
+### Interface Tkinter fallback
+
 ```bash
 python servo_control_app.py
 ```
@@ -95,6 +123,18 @@ Conecte o Arduino com Firmata usando a porta serial, por exemplo:
 
 Depois selecione uma postura e clique em `Executar`.
 
+Tambem e possivel ativar `Live control` para enviar os movimentos dos sliders ao Arduino em tempo real.
+
+## Recursos extras
+
+- `Timeline`: mostra a ordem e o tempo estimado de cada servo.
+- `Playback global`: executa em `0.5x`, `1x`, `1.5x` ou `2x` sem alterar o dataset.
+- `Coreografia`: executa todas as posturas salvas em sequencia.
+- `Validador de seguranca`: alerta movimentos bruscos com velocidade alta.
+- `Grafico angular`: compara os angulos dos 6 servos.
+- `Painel ao vivo`: mostra porta, ultima acao, ultimo servo e horario.
+- `Exportar CSV`: gera um dataset consolidado em `exports/`.
+
 ## Formato do vetor
 
 Exemplo:
@@ -125,9 +165,13 @@ A interface trata:
 
 ```text
 servo-firmata-control-python/
+  api_server.py
   servo_control_app.py
   requirements.txt
+  web/
+    src/
   logs/
+  exports/
   arduino/
   docs/
 ```
