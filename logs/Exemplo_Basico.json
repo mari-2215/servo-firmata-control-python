@@ -1,0 +1,59 @@
+{
+  "vector": "Exemplo_Basico_M1_30_V1_5_M2_60_V2_8_M3_90_V3_10_M4_45_V4_6_M5_120_V5_7_M6_20_V6_4_ORDEM_1-2-3-4-5-6_MODO_SEQUENCIAL",
+  "posture": {
+    "name": "Exemplo_Basico",
+    "servos": [
+      {
+        "index": 1,
+        "pin": 3,
+        "name": "Base",
+        "angle": 30,
+        "speed": 5
+      },
+      {
+        "index": 2,
+        "pin": 5,
+        "name": "Ombro",
+        "angle": 60,
+        "speed": 8
+      },
+      {
+        "index": 3,
+        "pin": 6,
+        "name": "Cotovelo",
+        "angle": 90,
+        "speed": 10
+      },
+      {
+        "index": 4,
+        "pin": 9,
+        "name": "Punho A",
+        "angle": 45,
+        "speed": 6
+      },
+      {
+        "index": 5,
+        "pin": 10,
+        "name": "Punho B",
+        "angle": 120,
+        "speed": 7
+      },
+      {
+        "index": 6,
+        "pin": 11,
+        "name": "Garra",
+        "angle": 20,
+        "speed": 4
+      }
+    ],
+    "order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "mode": "sequencial"
+  }
+}
