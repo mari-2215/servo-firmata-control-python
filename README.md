@@ -1,182 +1,129 @@
-# Servo Firmata Control
+# Azimutal Minerva
 
-Interface grafica em Python para controlar 6 servomotores com Arduino Uno usando Firmata.
+Controle de leme azimutal para Arduino Mega usando FlySky FS-i4 com receptor FS-A6.
 
-O projeto atende a fase de controle de servomotores:
+O projeto le dois canais PWM do receptor:
 
-- 6 servos mapeados em D3, D5, D6, D9, D10 e D11.
-- Interface web moderna em React com 3 abas.
-- API Python com FastAPI, eventos em tempo real e comunicacao com Firmata.
-- Gravacao de posturas para formar dataset.
-- Execucao simulada sem Arduino.
-- Execucao real no Arduino via Firmata.
-- Vetor de controle com angulo, velocidade, ordem e modo.
-- Logs salvos em `logs/`.
-- Timeline, grafico angular, coreografia, playback global, live control e exportacao CSV.
+- canal vertical: escolhe entre referencia normal e referencia de re.
+- canal horizontal: esterca 45 graus para a esquerda ou 45 graus para a direita.
 
-## Mapeamento
+A regra principal e que o angulo do servo e sempre calculado como posicao absoluta. O codigo nunca manda girar mais 180 graus em cima do valor anterior. Isso evita acumulo de erro e ajuda a manter a referencia durante a troca entre frente e re.
 
-| Motor | Pino Arduino |
+## Primeiro upload: modo monitor
+
+Por seguranca, o firmware sobe em `ReceiverMonitorOnly`. Nesse modo o Arduino le o receptor, calcula os alvos e imprime tudo no monitor serial, mas nao manda pulso para o servo.
+
+Use esse modo primeiro, porque ele mostra se o radio esta chegando certo antes de mover o leme:
+
+~~~text
+out=monitor mode=forward steering=0.00 target=0.00 command=0.00 servoUs=1000 vUs=1100 hUs=1500 failsafe=no
+~~~
+
+Se `vUs` ou `hUs` aparecer com `!`, o canal esta sem pulso recente ou fora da faixa esperada. Confira fio, canal e GND comum.
+
+Depois que as leituras estiverem certas, mude em `src/main.cpp`:
+
+~~~cpp
+const ServoOutputMode servoOutputMode = ServoOutputMode::Position360Servo;
+~~~
+
+## Aviso importante sobre servo 360
+
+Esta logica assume um servo 360 posicional, ou seja, um servo que aceita um comando PWM para ir a um angulo absoluto entre 0 e 360 graus.
+
+Se o seu servo 360 for de rotacao continua, o PWM controla velocidade e sentido, nao posicao. Nesse caso, o servo vai parecer doido: `1000 us` gira para um lado, `1500 us` para, e `2000 us` gira para o outro. Nenhum codigo consegue garantir a referencia de 180 graus sem um sensor de posicao, como encoder, potenciometro ou AS5600. Para barco azimutal, use servo posicional 360 ou adicione feedback de posicao.
+
+## Mapa de controle
+
+| Entrada do FS-i4 | Sinal aproximado | Resultado |
+| --- | ---: | --- |
+| Vertical para baixo | abaixo de 1500 us | referencia normal, 0 graus |
+| Vertical para cima | acima de 1500 us | referencia de re, 180 graus |
+| Horizontal no centro | perto de 1500 us | sem desvio lateral |
+| Horizontal para esquerda | perto de 1000 us | -45 graus da referencia atual |
+| Horizontal para direita | perto de 2000 us | +45 graus da referencia atual |
+
+Exemplos:
+
+- frente + centro: 0 graus
+- frente + esquerda: 315 graus, que equivale a -45 graus
+- frente + direita: 45 graus
+- re + centro: 180 graus
+- re + esquerda: 135 graus
+- re + direita: 225 graus
+
+Se os sentidos ficarem invertidos, ajuste em `src/main.cpp`:
+
+~~~cpp
+const bool reverseWhenVerticalIsHigh = true;
+const bool invertHorizontal = false;
+~~~
+
+## Hardware alvo
+
+- Arduino Mega 2560
+- FlySky FS-i4
+- Receptor FlySky FS-A6
+- Servo 360 posicional
+- Fonte/BEC separado para o servo, com GND em comum com o Arduino
+
+Ligacao sugerida:
+
+| Sinal | Pino Arduino Mega |
 | --- | --- |
-| M1 | D3 |
-| M2 | D5 |
-| M3 | D6 |
-| M4 | D9 |
-| M5 | D10 |
-| M6 | D11 |
+| FS-A6 canal vertical, sugerido CH3 | D18 |
+| FS-A6 canal horizontal, sugerido CH1 | D19 |
+| Sinal do servo azimutal | D9 |
+| GND do receptor, Arduino e BEC | comum |
 
-## Preparar o Arduino
-
-1. Abra a Arduino IDE.
-2. Va em `File > Examples > Firmata > StandardFirmata`.
-3. Selecione `Arduino Uno`.
-4. Escolha a porta.
-5. Faca upload.
-
-O projeto Python usa Firmata, entao nao precisa de um sketch proprio alem do `StandardFirmata`.
-
-## Instalar dependencias
-
-```bash
-python -m venv .venv
-```
-
-Windows:
-
-```bash
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Rodar
-
-### Interface web React
-
-Terminal 1, backend/API:
-
-```bash
-uvicorn api_server:app --reload --host 127.0.0.1 --port 8000
-```
-
-Terminal 2, frontend:
-
-```bash
-cd web
-pnpm install
-pnpm run dev
-```
-
-Acesse:
-
-```text
-http://127.0.0.1:5173
-```
-
-Se preferir npm, use `npm install` e `npm run dev`.
-
-### Interface Tkinter fallback
-
-```bash
-python servo_control_app.py
-```
-
-## Abas da interface
-
-### 1. Gravar dataset
-
-Use os sliders para configurar:
-
-- angulo de cada servo;
-- velocidade individual;
-- nome de cada motor;
-- ordem de execucao;
-- modo `sequencial` ou `simultaneo`.
-
-Depois clique em `Salvar postura`.
-
-Cada postura gera um arquivo `.json` dentro de `logs/`.
-
-### 2. Executar simulacao
-
-Lista todas as posturas salvas e executa sem Arduino conectado.
-
-Os servos virtuais se movem na tela respeitando:
-
-- angulo salvo;
-- velocidade salva;
-- ordem salva;
-- modo sequencial ou simultaneo.
-
-### 3. Executar Arduino
-
-Conecte o Arduino com Firmata usando a porta serial, por exemplo:
-
-- Windows: `COM3`
-- Linux: `/dev/ttyACM0` ou `/dev/ttyACM1`
-
-Depois selecione uma postura e clique em `Executar`.
-
-Tambem e possivel ativar `Live control` para enviar os movimentos dos sliders ao Arduino em tempo real.
-
-## Recursos extras
-
-- `Timeline`: mostra a ordem e o tempo estimado de cada servo.
-- `Playback global`: executa em `0.5x`, `1x`, `1.5x` ou `2x` sem alterar o dataset.
-- `Coreografia`: executa todas as posturas salvas em sequencia.
-- `Validador de seguranca`: alerta movimentos bruscos com velocidade alta.
-- `Grafico angular`: compara os angulos dos 6 servos.
-- `Painel ao vivo`: mostra porta, ultima acao, ultimo servo e horario.
-- `Exportar CSV`: gera um dataset consolidado em `exports/`.
-
-## Formato do vetor
-
-Exemplo:
-
-```text
-Ex1_M1_30_V1_5_M2_60_V2_8_M3_90_V3_10_M4_45_V4_6_M5_120_V5_7_M6_20_V6_4_ORDEM_1-2-3-4-5-6_MODO_SEQUENCIAL
-```
-
-O vetor contem:
-
-- nome da postura;
-- angulo de cada motor;
-- velocidade de cada motor;
-- ordem de execucao;
-- modo de execucao.
-
-## Tratamento de erros
-
-A interface trata:
-
-- Arduino nao conectado;
-- porta serial invalida;
-- arquivo de postura ausente;
-- postura/vetor mal formatado;
-- dependencia `pyfirmata` ausente.
+Nao alimente o servo pelo pino 5V do Arduino se ele tiver carga mecanica. Use uma fonte/BEC adequada para o servo.
 
 ## Estrutura
 
-```text
-servo-firmata-control-python/
-  api_server.py
-  servo_control_app.py
-  requirements.txt
-  web/
-    src/
-  logs/
-  exports/
-  arduino/
-  docs/
-```
+- src/main.cpp: leitura dos canais PWM no Arduino Mega e comando do servo.
+- include/AzimuthControl.h: interface da logica de controle.
+- src/AzimuthControl.cpp: calculo de modo, desvio lateral e angulo absoluto.
+- test/test_azimuth_logic/test_main.cpp: testes da logica sem hardware.
+- docs/: detalhes de hardware, logica, calibracao e testes.
+- docs/calibration.md: roteiro para descobrir os intervalos reais do FS-i4/FS-A6.
 
-## Documentacao
+## Como ajustar
 
-- `docs/tutorial.md`: passo a passo de instalacao, gravacao, simulacao e execucao no Arduino.
-- `docs/architecture.md`: resumo tecnico do fluxo entre interface, Firmata, Arduino e servos.
+Os principais ajustes ficam em `src/main.cpp`:
+
+- `servoOutputMode`: deixa em monitor ou liga a saida para servo posicional 360.
+- `verticalMinUs`, `verticalCenterUs`, `verticalMaxUs`: intervalo real do canal vertical.
+- `horizontalMinUs`, `horizontalCenterUs`, `horizontalMaxUs`: intervalo real do canal horizontal.
+- `reverseWhenVerticalIsHigh`: inverte qual metade vertical chama a re.
+- `invertHorizontal`: inverte esquerda/direita.
+- `rcMinUs`, `rcCenterUs`, `rcMaxUs`: calibracao dos sinais do receptor.
+- `rcDeadbandUs`: zona morta para evitar jitter perto do centro.
+- `servoPosition0Us`, `servoPosition360Us`: faixa PWM aceita pelo servo 360 posicional.
+- `servoZeroOffsetDeg`: correcao caso o zero mecanico do servo nao esteja alinhado com o barco.
+- `maxRateDegPerSecond`: velocidade maxima de mudanca de angulo.
+
+Tambem confira `makeAzimuthConfig()` para ajustar:
+
+- `forwardReferenceDeg`
+- `reverseReferenceDeg`
+- `maxSteeringDeg`
+
+## Testes
+
+Com PlatformIO instalado:
+
+~~~bash
+pio test -e native
+~~~
+
+Para compilar para Arduino Mega:
+
+~~~bash
+pio run -e mega2560
+~~~
+
+Para gravar no Arduino Mega:
+
+~~~bash
+pio run -e mega2560 -t upload
+~~~
