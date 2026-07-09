@@ -486,6 +486,19 @@ label,
   font-family: Consolas, monospace;
 }
 
+.connection-log {
+  border: 1px solid #19363d;
+  border-radius: 8px;
+  background: #071013;
+  color: #83a0a8;
+  font: 700 12px Consolas, monospace;
+  line-height: 1.45;
+  max-height: 150px;
+  overflow: auto;
+  padding: 12px;
+  word-break: break-word;
+}
+
 .toast {
   position: fixed;
   right: 22px;

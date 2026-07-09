@@ -29,6 +29,7 @@ function App() {
   const [live, setLive] = useState(false);
   const [force, setForce] = useState(false);
   const [toast, setToast] = useState("");
+  const [connectionLog, setConnectionLog] = useState("Aguardando conexao.");
 
   useEffect(() => {
     bootstrap();
@@ -112,16 +113,23 @@ function App() {
         setPort(connected.port || "");
         setToast(`Arduino conectado automaticamente em ${connected.port}`);
       } catch (error) {
+        setConnectionLog(error.message);
         setToast(`Auto connect aguardando Arduino: ${error.message}`);
       }
     }
   }
 
   async function refreshPorts() {
-    const nextPorts = await api("/api/ports");
-    setPorts(nextPorts);
-    if (!port && nextPorts.length) setPort(nextPorts[0].device);
-    setToast(nextPorts.length ? `${nextPorts.length} porta(s) detectada(s)` : "Nenhuma porta serial detectada");
+    try {
+      const nextPorts = await api("/api/ports");
+      setPorts(nextPorts);
+      if (!port && nextPorts.length) setPort(nextPorts[0].device);
+      setToast(nextPorts.length ? `${nextPorts.length} porta(s) detectada(s)` : "Nenhuma porta serial detectada");
+      setConnectionLog(nextPorts.length ? nextPorts.map((item) => `${item.device} ${item.description || item.hwid || ""}`).join(" | ") : "Nenhuma porta serial detectada.");
+    } catch (error) {
+      setConnectionLog(error.message);
+      setToast(`Erro ao buscar portas: ${error.message}`);
+    }
   }
 
   async function savePosture() {
@@ -138,21 +146,35 @@ function App() {
   }
 
   async function connect() {
-    const next = await api("/api/connect", { method: "POST", body: JSON.stringify({ port }) });
-    setState(next);
-    setServos(next.servos);
-    setPorts(next.ports || []);
-    setPort(next.port || port);
-    setToast(`Arduino conectado em ${next.port}`);
+    setToast(`Conectando${port ? ` em ${port}` : " automaticamente"}...`);
+    try {
+      const next = await api("/api/connect", { method: "POST", body: JSON.stringify({ port }) });
+      setState(next);
+      setServos(next.servos);
+      setPorts(next.ports || []);
+      setPort(next.port || port);
+      setConnectionLog(`Conectado em ${next.port}`);
+      setToast(`Arduino conectado em ${next.port}`);
+    } catch (error) {
+      setConnectionLog(error.message);
+      setToast(`Falha ao conectar: ${error.message}`);
+    }
   }
 
   async function autoconnect() {
-    const next = await api("/api/autoconnect", { method: "POST" });
-    setState(next);
-    setServos(next.servos);
-    setPorts(next.ports || []);
-    setPort(next.port || "");
-    setToast(`Arduino conectado automaticamente em ${next.port}`);
+    setToast("Escaneando portas e tentando conectar...");
+    try {
+      const next = await api("/api/autoconnect", { method: "POST" });
+      setState(next);
+      setServos(next.servos);
+      setPorts(next.ports || []);
+      setPort(next.port || "");
+      setConnectionLog(`Conectado em ${next.port}`);
+      setToast(`Arduino conectado automaticamente em ${next.port}`);
+    } catch (error) {
+      setConnectionLog(error.message);
+      setToast(`Auto connect falhou: ${error.message}`);
+    }
   }
 
   async function disconnect() {
@@ -285,6 +307,7 @@ function App() {
               onRefreshPorts={refreshPorts}
               onDisconnect={disconnect}
               state={state}
+              connectionLog={connectionLog}
             />
             <PostureLibrary postures={state?.postures || []} selected={selected} setSelected={setSelected} refresh={refreshState} />
           </div>
@@ -428,7 +451,7 @@ function RunPanel({ title, connected, posture, liveServos, estimate, vector, war
   );
 }
 
-function ArduinoPanel({ port, setPort, ports, connected, live, setLive, onConnect, onAutoConnect, onRefreshPorts, onDisconnect, state }) {
+function ArduinoPanel({ port, setPort, ports, connected, live, setLive, onConnect, onAutoConnect, onRefreshPorts, onDisconnect, state, connectionLog }) {
   return (
     <section className="panel arduino-panel">
       <div className="panel-title">
@@ -462,6 +485,7 @@ function ArduinoPanel({ port, setPort, ports, connected, live, setLive, onConnec
         <span>Ultimo servo</span><b>{state?.lastServo || "-"}</b>
         <span>Horario</span><b>{state?.lastTimestamp || "-"}</b>
       </div>
+      <div className="connection-log">{connectionLog}</div>
     </section>
   );
 }

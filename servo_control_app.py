@@ -33,6 +33,20 @@ SERVO_PINS = [3, 5, 6, 9, 10, 11]
 SERVO_COUNT = 6
 MAX_SAFE_JUMP = 110
 HIGH_SPEED = 16
+COMMON_SERIAL_PORTS = [
+    "/dev/ttyACM0",
+    "/dev/ttyACM1",
+    "/dev/ttyACM2",
+    "/dev/ttyUSB0",
+    "/dev/ttyUSB1",
+    "/dev/ttyUSB2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+]
 
 
 @dataclass
@@ -653,33 +667,42 @@ class ServoControlApp(tk.Tk):
         if Arduino is None:
             messagebox.showerror("Dependencia ausente", "Instale pyfirmata: pip install pyfirmata")
             return
-        port = autodetect_port(self.connected_port.get())
-        if not port:
-            available = ", ".join(item["device"] for item in list_serial_ports()) or "nenhuma porta detectada"
-            messagebox.showerror("Arduino nao encontrado", f"Nenhum Arduino detectado.\nPortas encontradas: {available}")
+        candidates = candidate_ports(self.connected_port.get())
+        if not candidates:
+            messagebox.showerror("Arduino nao encontrado", "Nenhuma porta serial detectada.")
             return
-        try:
-            self.disconnect_arduino(silent=True)
-            self.board = Arduino(port)
-            time.sleep(2.0)
-            self.iterator = util.Iterator(self.board) if util is not None else None
-            if self.iterator is not None:
-                self.iterator.start()
-            self.servo_pins = {}
-            for pin in SERVO_PINS:
-                self.board.digital[pin].mode = SERVO
-                self.servo_pins[pin] = self.board.digital[pin]
-                self.board.digital[pin].write(0)
-                time.sleep(0.03)
-            self.board_state.set(f"Conectado em {port}")
-            self.connected_port.set(port)
-            self.update_live_state()
-            self.set_status(f"Arduino conectado em {port}")
-        except Exception as exc:
-            self.board = None
-            self.iterator = None
-            self.board_state.set("Falha de conexao")
-            messagebox.showerror("Falha ao conectar Arduino", str(exc))
+        self.disconnect_arduino(silent=True)
+        errors = []
+        for port in candidates:
+            try:
+                self.board = Arduino(port)
+                time.sleep(2.0)
+                self.iterator = util.Iterator(self.board) if util is not None else None
+                if self.iterator is not None:
+                    self.iterator.start()
+                self.servo_pins = {}
+                for pin in SERVO_PINS:
+                    self.board.digital[pin].mode = SERVO
+                    self.servo_pins[pin] = self.board.digital[pin]
+                    self.board.digital[pin].write(0)
+                    time.sleep(0.03)
+                self.board_state.set(f"Conectado em {port}")
+                self.connected_port.set(port)
+                self.update_live_state()
+                self.set_status(f"Arduino conectado em {port}")
+                return
+            except Exception as exc:
+                errors.append(f"{port}: {exc}")
+                if self.board is not None:
+                    try:
+                        self.board.exit()
+                    except Exception:
+                        pass
+                self.board = None
+                self.iterator = None
+                self.servo_pins = {}
+        self.board_state.set("Falha de conexao")
+        messagebox.showerror("Falha ao conectar Arduino", "\n".join(errors[-6:]))
 
     def disconnect_arduino(self, silent: bool = False) -> None:
         if self.board is not None:
@@ -778,22 +801,59 @@ def list_serial_ports() -> list[dict[str, str]]:
     ]
 
 
+def normalize_port_name(port: str) -> str:
+    value = port.strip()
+    if not value:
+        return ""
+    lowered = value.lower().replace("\\", "/")
+    if lowered.startswith("/dev/") or lowered.upper().startswith("COM"):
+        return value
+    if re.fullmatch(r"acm\d+", lowered):
+        return "/dev/tty" + lowered.upper()
+    if re.fullmatch(r"ttyacm\d+", lowered):
+        return "/dev/" + lowered
+    if re.fullmatch(r"usb\d+", lowered):
+        return "/dev/tty" + lowered.upper()
+    if re.fullmatch(r"ttyusb\d+", lowered):
+        return "/dev/" + lowered
+    if re.fullmatch(r"com\d+", lowered):
+        return lowered.upper()
+    return value
+
+
+def candidate_ports(preferred: str = "") -> list[str]:
+    candidates = []
+    normalized = normalize_port_name(preferred)
+    if normalized:
+        candidates.append(normalized)
+    for port in sorted(list_serial_ports(), key=port_priority):
+        candidates.append(port["device"])
+    candidates.extend(COMMON_SERIAL_PORTS)
+    return unique_items(candidates)
+
+
 def autodetect_port(preferred: str = "") -> str:
-    preferred = preferred.strip()
-    ports = list_serial_ports()
-    if preferred:
-        for port in ports:
-            if port["device"] == preferred:
-                return preferred
-        return preferred
-    strong_tokens = ("arduino", "uno", "ch340", "ch341", "usb-serial", "usb serial")
-    soft_tokens = ("acm", "usbmodem", "ttyusb", "com")
-    for token_group in (strong_tokens, soft_tokens):
-        for port in ports:
-            haystack = f"{port['device']} {port['description']} {port['hwid']}".lower()
-            if any(token in haystack for token in token_group):
-                return port["device"]
-    return ports[0]["device"] if ports else ""
+    candidates = candidate_ports(preferred)
+    return candidates[0] if candidates else ""
+
+
+def port_priority(port: dict[str, str]) -> int:
+    haystack = f"{port['device']} {port['description']} {port['hwid']}".lower()
+    if any(token in haystack for token in ("arduino", "uno", "ch340", "ch341")):
+        return 0
+    if any(token in haystack for token in ("acm", "usbmodem", "ttyusb", "usb serial", "usb-serial")):
+        return 1
+    return 2
+
+
+def unique_items(items: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def main() -> None:
