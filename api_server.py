@@ -19,10 +19,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from pyfirmata import Arduino, SERVO
+    from pyfirmata import Arduino, SERVO, util
 except ImportError:  # The API keeps simulation mode alive without Arduino deps.
     Arduino = None
     SERVO = None
+    util = None
+
+try:
+    from serial.tools import list_ports
+except ImportError:
+    list_ports = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -78,7 +84,7 @@ class PosturePayload(BaseModel):
 
 
 class ConnectPayload(BaseModel):
-    port: str
+    port: str = ""
 
 
 class ExecutePayload(BaseModel):
@@ -105,6 +111,7 @@ class ServoManager:
         EXPORT_DIR.mkdir(exist_ok=True)
         self.servos = [ServoState(i + 1, SERVO_PINS[i], f"Motor {i + 1}") for i in range(SERVO_COUNT)]
         self.board = None
+        self.iterator = None
         self.servo_pins: dict[int, Any] = {}
         self.connected_port = ""
         self.status = "API pronta em modo simulacao."
@@ -128,6 +135,7 @@ class ServoManager:
                 "lastServo": self.last_servo,
                 "lastTimestamp": self.last_timestamp,
                 "postures": self.list_postures(),
+                "ports": list_serial_ports(),
             }
 
     def emit(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
@@ -152,6 +160,7 @@ class ServoManager:
             "lastServo": self.last_servo,
             "lastTimestamp": self.last_timestamp,
             "postures": self.list_postures(),
+            "ports": list_serial_ports(),
         }
 
     def get_events_after(self, last_id: int) -> list[dict[str, Any]]:
@@ -187,29 +196,49 @@ class ServoManager:
         servos = [ServoState(**item) for item in raw["servos"]]
         return Posture(raw["name"], servos, list(raw["order"]), raw["mode"])
 
-    def connect(self, port: str) -> None:
+    def connect(self, port: str = "") -> None:
         if Arduino is None:
             raise RuntimeError("Instale pyfirmata para conectar ao Arduino.")
-        board = Arduino(port)
-        servo_pins = {}
-        for pin in SERVO_PINS:
-            board.digital[pin].mode = SERVO
-            servo_pins[pin] = board.digital[pin]
-            board.digital[pin].write(0)
-        self.board = board
-        self.servo_pins = servo_pins
-        self.connected_port = port
-        self.status = f"Arduino conectado em {port}"
-        self.emit("connected", {"port": port})
+        selected_port = autodetect_port(port)
+        if not selected_port:
+            available = ", ".join(item["device"] for item in list_serial_ports()) or "nenhuma porta detectada"
+            raise RuntimeError(f"Nenhum Arduino detectado. Portas encontradas: {available}")
+        self.disconnect(silent=True)
+        try:
+            board = Arduino(selected_port)
+            time.sleep(2.0)  # Arduino Uno resets when the serial port opens.
+            iterator = util.Iterator(board) if util is not None else None
+            if iterator is not None:
+                iterator.start()
+            servo_pins = {}
+            for pin in SERVO_PINS:
+                board.digital[pin].mode = SERVO
+                servo_pins[pin] = board.digital[pin]
+                board.digital[pin].write(0)
+                time.sleep(0.03)
+            self.board = board
+            self.iterator = iterator
+            self.servo_pins = servo_pins
+            self.connected_port = selected_port
+            self.status = f"Arduino conectado em {selected_port}"
+            self.emit("connected", {"port": selected_port})
+        except Exception:
+            self.board = None
+            self.iterator = None
+            self.servo_pins = {}
+            self.connected_port = ""
+            raise
 
-    def disconnect(self) -> None:
+    def disconnect(self, silent: bool = False) -> None:
         if self.board is not None:
             self.board.exit()
         self.board = None
+        self.iterator = None
         self.servo_pins = {}
         self.connected_port = ""
         self.status = "Arduino desconectado."
-        self.emit("disconnected")
+        if not silent:
+            self.emit("disconnected")
 
     def execute(self, payload: ExecutePayload) -> dict[str, Any]:
         posture = self.load_posture(payload.name)
@@ -395,6 +424,11 @@ def state() -> dict[str, Any]:
     return manager.snapshot()
 
 
+@app.get("/api/ports")
+def ports() -> list[dict[str, str]]:
+    return list_serial_ports()
+
+
 @app.get("/api/postures")
 def postures() -> list[str]:
     return manager.list_postures()
@@ -422,6 +456,15 @@ def save_posture(payload: PosturePayload) -> dict[str, Any]:
 def connect(payload: ConnectPayload) -> dict[str, Any]:
     try:
         manager.connect(payload.port.strip())
+        return manager.snapshot()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/autoconnect")
+def autoconnect() -> dict[str, Any]:
+    try:
+        manager.connect("")
         return manager.snapshot()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -507,3 +550,36 @@ def normalize_order(order: list[int]) -> list[int]:
 def safe_name(text: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", text.strip())
     return cleaned or "Postura"
+
+
+def list_serial_ports() -> list[dict[str, str]]:
+    if list_ports is None:
+        return []
+    ports = []
+    for port in list_ports.comports():
+        ports.append(
+            {
+                "device": port.device,
+                "description": port.description or "",
+                "hwid": port.hwid or "",
+            }
+        )
+    return ports
+
+
+def autodetect_port(preferred: str = "") -> str:
+    preferred = preferred.strip()
+    ports = list_serial_ports()
+    if preferred:
+        for port in ports:
+            if port["device"] == preferred:
+                return preferred
+        return preferred
+    strong_tokens = ("arduino", "uno", "ch340", "ch341", "usb-serial", "usb serial")
+    soft_tokens = ("acm", "usbmodem", "ttyusb", "com")
+    for token_group in (strong_tokens, soft_tokens):
+        for port in ports:
+            haystack = f"{port['device']} {port['description']} {port['hwid']}".lower()
+            if any(token in haystack for token in token_group):
+                return port["device"]
+    return ports[0]["device"] if ports else ""

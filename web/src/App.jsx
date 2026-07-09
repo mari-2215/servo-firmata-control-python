@@ -24,13 +24,14 @@ function App() {
   const [selected, setSelected] = useState("");
   const [selectedPosture, setSelectedPosture] = useState(null);
   const [port, setPort] = useState("");
+  const [ports, setPorts] = useState([]);
   const [globalSpeed, setGlobalSpeed] = useState(1);
   const [live, setLive] = useState(false);
   const [force, setForce] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
-    refreshState();
+    bootstrap();
     const source = new EventSource(`${API}/api/events`);
     const updateFromEvent = (event) => {
       const data = JSON.parse(event.data);
@@ -95,6 +96,32 @@ function App() {
     const next = await api("/api/state");
     setState(next);
     setServos(next.servos);
+    setPorts(next.ports || []);
+    if (!port && next.ports?.length) setPort(next.ports[0].device);
+    return next;
+  }
+
+  async function bootstrap() {
+    const next = await refreshState();
+    if (!next.connected) {
+      try {
+        const connected = await api("/api/autoconnect", { method: "POST" });
+        setState(connected);
+        setServos(connected.servos);
+        setPorts(connected.ports || []);
+        setPort(connected.port || "");
+        setToast(`Arduino conectado automaticamente em ${connected.port}`);
+      } catch (error) {
+        setToast(`Auto connect aguardando Arduino: ${error.message}`);
+      }
+    }
+  }
+
+  async function refreshPorts() {
+    const nextPorts = await api("/api/ports");
+    setPorts(nextPorts);
+    if (!port && nextPorts.length) setPort(nextPorts[0].device);
+    setToast(nextPorts.length ? `${nextPorts.length} porta(s) detectada(s)` : "Nenhuma porta serial detectada");
   }
 
   async function savePosture() {
@@ -113,7 +140,19 @@ function App() {
   async function connect() {
     const next = await api("/api/connect", { method: "POST", body: JSON.stringify({ port }) });
     setState(next);
-    setToast(`Arduino conectado em ${port}`);
+    setServos(next.servos);
+    setPorts(next.ports || []);
+    setPort(next.port || port);
+    setToast(`Arduino conectado em ${next.port}`);
+  }
+
+  async function autoconnect() {
+    const next = await api("/api/autoconnect", { method: "POST" });
+    setState(next);
+    setServos(next.servos);
+    setPorts(next.ports || []);
+    setPort(next.port || "");
+    setToast(`Arduino conectado automaticamente em ${next.port}`);
   }
 
   async function disconnect() {
@@ -237,10 +276,13 @@ function App() {
             <ArduinoPanel
               port={port}
               setPort={setPort}
+              ports={ports}
               connected={state?.connected}
               live={live}
               setLive={setLive}
               onConnect={connect}
+              onAutoConnect={autoconnect}
+              onRefreshPorts={refreshPorts}
               onDisconnect={disconnect}
               state={state}
             />
@@ -386,7 +428,7 @@ function RunPanel({ title, connected, posture, liveServos, estimate, vector, war
   );
 }
 
-function ArduinoPanel({ port, setPort, connected, live, setLive, onConnect, onDisconnect, state }) {
+function ArduinoPanel({ port, setPort, ports, connected, live, setLive, onConnect, onAutoConnect, onRefreshPorts, onDisconnect, state }) {
   return (
     <section className="panel arduino-panel">
       <div className="panel-title">
@@ -394,7 +436,19 @@ function ArduinoPanel({ port, setPort, connected, live, setLive, onConnect, onDi
         <h2>Arduino Uno</h2>
       </div>
       <div className="connect-row">
-        <input placeholder="COM3, /dev/ttyACM0, /dev/ttyACM1" value={port} onChange={(event) => setPort(event.target.value)} />
+        <select value={port} onChange={(event) => setPort(event.target.value)}>
+          <option value="">Auto detectar</option>
+          {ports.map((item) => (
+            <option key={item.device} value={item.device}>
+              {item.device} - {item.description || item.hwid || "porta serial"}
+            </option>
+          ))}
+        </select>
+        <button onClick={onRefreshPorts}>Buscar portas</button>
+        <button onClick={onAutoConnect}>Auto</button>
+      </div>
+      <div className="connect-row">
+        <input placeholder="Vazio = auto, ou COM3, /dev/ttyACM0, /dev/ttyACM1" value={port} onChange={(event) => setPort(event.target.value)} />
         <button className="primary" onClick={onConnect}>Conectar</button>
         <button onClick={onDisconnect}>Desconectar</button>
       </div>

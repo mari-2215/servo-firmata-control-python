@@ -13,10 +13,16 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 try:
-    from pyfirmata import Arduino, SERVO
+    from pyfirmata import Arduino, SERVO, util
 except ImportError:  # The app still works in simulation mode without pyfirmata.
     Arduino = None
     SERVO = None
+    util = None
+
+try:
+    from serial.tools import list_ports
+except ImportError:
+    list_ports = None
 
 
 APP_TITLE = "Servo Firmata Control"
@@ -66,6 +72,7 @@ class ServoControlApp(tk.Tk):
         LOG_DIR.mkdir(exist_ok=True)
         EXPORT_DIR.mkdir(exist_ok=True)
         self.board = None
+        self.iterator = None
         self.servo_pins = {}
         self.connected_port = tk.StringVar(value="")
         self.status = tk.StringVar(value="Simulacao pronta. Todos os servos em zero.")
@@ -243,9 +250,10 @@ class ServoControlApp(tk.Tk):
             ttk.Label(conn, text="Porta serial Arduino", style="Panel.TLabel").grid(row=0, column=0, sticky="w")
             ttk.Entry(conn, textvariable=self.connected_port, width=22).grid(row=1, column=0, sticky="ew", pady=(6, 0))
             ttk.Button(conn, text="Conectar Firmata", command=self.connect_arduino).grid(row=1, column=1, padx=(8, 0), pady=(6, 0))
-            ttk.Button(conn, text="Desconectar", command=self.disconnect_arduino).grid(row=1, column=2, padx=(8, 0), pady=(6, 0))
+            ttk.Button(conn, text="Auto", command=self.autofill_port).grid(row=1, column=2, padx=(8, 0), pady=(6, 0))
+            ttk.Button(conn, text="Desconectar", command=self.disconnect_arduino).grid(row=1, column=3, padx=(8, 0), pady=(6, 0))
             ttk.Checkbutton(conn, text="Live control", variable=self.live_control, command=self.update_live_state).grid(row=2, column=0, sticky="w", pady=(8, 0))
-            ttk.Label(conn, text="Ex.: COM3, /dev/ttyACM0 ou /dev/ttyACM1", style="Small.Panel.TLabel").grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            ttk.Label(conn, text="Deixe vazio para auto detectar. Ex.: COM3, /dev/ttyACM0 ou /dev/ttyACM1", style="Small.Panel.TLabel").grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
             live = ttk.Frame(left, style="Panel.TFrame", padding=14)
             live.pack(fill="x", pady=(12, 0))
@@ -645,33 +653,52 @@ class ServoControlApp(tk.Tk):
         if Arduino is None:
             messagebox.showerror("Dependencia ausente", "Instale pyfirmata: pip install pyfirmata")
             return
-        port = self.connected_port.get().strip()
+        port = autodetect_port(self.connected_port.get())
         if not port:
-            messagebox.showerror("Porta invalida", "Informe a porta serial do Arduino.")
+            available = ", ".join(item["device"] for item in list_serial_ports()) or "nenhuma porta detectada"
+            messagebox.showerror("Arduino nao encontrado", f"Nenhum Arduino detectado.\nPortas encontradas: {available}")
             return
         try:
+            self.disconnect_arduino(silent=True)
             self.board = Arduino(port)
+            time.sleep(2.0)
+            self.iterator = util.Iterator(self.board) if util is not None else None
+            if self.iterator is not None:
+                self.iterator.start()
             self.servo_pins = {}
             for pin in SERVO_PINS:
                 self.board.digital[pin].mode = SERVO
                 self.servo_pins[pin] = self.board.digital[pin]
                 self.board.digital[pin].write(0)
+                time.sleep(0.03)
             self.board_state.set(f"Conectado em {port}")
+            self.connected_port.set(port)
             self.update_live_state()
             self.set_status(f"Arduino conectado em {port}")
         except Exception as exc:
             self.board = None
+            self.iterator = None
             self.board_state.set("Falha de conexao")
             messagebox.showerror("Falha ao conectar Arduino", str(exc))
 
-    def disconnect_arduino(self) -> None:
+    def disconnect_arduino(self, silent: bool = False) -> None:
         if self.board is not None:
             self.board.exit()
         self.board = None
+        self.iterator = None
         self.servo_pins = {}
         self.board_state.set("Arduino desconectado")
         self.update_live_state()
-        self.set_status("Arduino desconectado.")
+        if not silent:
+            self.set_status("Arduino desconectado.")
+
+    def autofill_port(self) -> None:
+        port = autodetect_port("")
+        if port:
+            self.connected_port.set(port)
+            self.set_status(f"Porta detectada: {port}")
+        else:
+            self.set_status("Nenhuma porta serial detectada.")
 
     def update_live_state(self) -> None:
         state = "Live on" if self.live_control.get() and self.board is not None else "Live off"
@@ -740,6 +767,33 @@ def parse_order(text: str) -> list[int]:
 def safe_name(text: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", text.strip())
     return cleaned or "Postura"
+
+
+def list_serial_ports() -> list[dict[str, str]]:
+    if list_ports is None:
+        return []
+    return [
+        {"device": port.device, "description": port.description or "", "hwid": port.hwid or ""}
+        for port in list_ports.comports()
+    ]
+
+
+def autodetect_port(preferred: str = "") -> str:
+    preferred = preferred.strip()
+    ports = list_serial_ports()
+    if preferred:
+        for port in ports:
+            if port["device"] == preferred:
+                return preferred
+        return preferred
+    strong_tokens = ("arduino", "uno", "ch340", "ch341", "usb-serial", "usb serial")
+    soft_tokens = ("acm", "usbmodem", "ttyusb", "com")
+    for token_group in (strong_tokens, soft_tokens):
+        for port in ports:
+            haystack = f"{port['device']} {port['description']} {port['hwid']}".lower()
+            if any(token in haystack for token in token_group):
+                return port["device"]
+    return ports[0]["device"] if ports else ""
 
 
 def main() -> None:

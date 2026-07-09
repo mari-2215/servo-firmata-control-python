@@ -67,8 +67,9 @@ Os servos virtuais mostram o movimento interpolado e respeitam o modo, a ordem e
 ## 6. Executar no Arduino
 
 1. Abra `3. Executar Arduino`.
-2. Digite a porta serial, como `COM3`, `/dev/ttyACM0` ou `/dev/ttyACM1`.
-3. Clique em `Conectar Firmata`.
+2. A interface tenta conectar automaticamente.
+3. Se nao conectar, deixe a porta vazia e clique em `Auto` ou `Conectar`.
+4. Se preferir, digite a porta serial, como `COM3`, `/dev/ttyACM0` ou `/dev/ttyACM1`.
 4. Selecione uma postura.
 5. Clique em `Executar`.
 
@@ -88,4 +89,6 @@ Durante a execucao, a interface envia cada angulo ao Arduino via Firmata. No mod
 - `fastapi` ou `uvicorn` ausente: rode `pip install -r requirements.txt`.
 - Porta invalida: confira a porta na Arduino IDE ou no gerenciador de dispositivos.
 - Arduino nao responde: faca upload do `StandardFirmata` novamente.
+- Porta ocupada: feche Arduino IDE, Serial Monitor, PlatformIO Monitor ou outro programa usando a serial.
+- Arduino reiniciando: aguarde alguns segundos e clique em `Auto` novamente.
 - Lista vazia: salve uma postura na primeira aba ou verifique a pasta `logs/`.

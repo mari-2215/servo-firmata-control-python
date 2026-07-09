@@ -73,6 +73,21 @@ input:focus {
   box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.14);
 }
 
+select {
+  width: 100%;
+  border: 1px solid #244b55;
+  border-radius: 8px;
+  background: #091316;
+  color: #eaf2f5;
+  padding: 10px 12px;
+  outline: none;
+}
+
+select:focus {
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.14);
+}
+
 input[type="range"] {
   accent-color: #00d9ff;
   padding: 0;

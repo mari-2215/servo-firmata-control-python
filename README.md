@@ -116,7 +116,11 @@ Os servos virtuais se movem na tela respeitando:
 
 ### 3. Executar Arduino
 
-Conecte o Arduino com Firmata usando a porta serial, por exemplo:
+Conecte o Arduino com Firmata. A interface tenta detectar a porta automaticamente ao abrir.
+
+Voce tambem pode deixar o campo de porta vazio e clicar em `Conectar` ou `Auto`.
+
+Exemplos de porta manual:
 
 - Windows: `COM3`
 - Linux: `/dev/ttyACM0` ou `/dev/ttyACM1`
@@ -124,6 +128,13 @@ Conecte o Arduino com Firmata usando a porta serial, por exemplo:
 Depois selecione uma postura e clique em `Executar`.
 
 Tambem e possivel ativar `Live control` para enviar os movimentos dos sliders ao Arduino em tempo real.
+
+Se a conexao falhar, confira:
+
+- o Arduino precisa estar com `StandardFirmata`;
+- feche Arduino IDE/Serial Monitor antes de conectar pela interface;
+- desconecte e conecte o cabo USB de novo;
+- aguarde dois segundos apos conectar, porque o Arduino Uno reinicia quando a serial abre.
 
 ## Recursos extras
 
